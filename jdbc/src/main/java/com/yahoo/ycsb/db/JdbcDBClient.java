@@ -84,6 +84,7 @@ public class JdbcDBClient extends DB {
   private Properties props;
   private int jdbcFetchSize;
   private int batchSize;
+  private boolean autoCommit;
   private static final String DEFAULT_PROP = "";
   private ConcurrentMap<StatementType, PreparedStatement> cachedStatements;
   private long numRowsInBatch = 0;
@@ -308,7 +309,7 @@ public class JdbcDBClient extends DB {
     this.jdbcFetchSize = getIntProperty(props, JDBC_FETCH_SIZE);
     this.batchSize = getIntProperty(props, DB_BATCH_SIZE);
 
-    boolean autoCommit = getBoolProperty(props, JDBC_AUTO_COMMIT, true);
+    this.autoCommit = getBoolProperty(props, JDBC_AUTO_COMMIT, true);
 
     try {
       if (driver != null) {
@@ -619,13 +620,21 @@ public class JdbcDBClient extends DB {
       }
       int result;
       if (batchSize > 0) {
-        insertStatement.addBatch();
+        if (autoCommit) {
+          insertStatement.addBatch();
+        } else {
+          result = insertStatement.executeUpdate();
+        }
         if (++numRowsInBatch % batchSize == 0) {
-          int[] results = insertStatement.executeBatch();
-          for (int r : results) {
-            if (r != 1) {
-              return Status.ERROR;
+          if (autoCommit) {
+            int[] results = insertStatement.executeBatch();
+            for (int r : results) {
+              if (r != 1) {
+                return Status.ERROR;
+              }
             }
+          } else {
+            getShardConnectionByKey(key).commit();
           }
         }
         return Status.OK;
